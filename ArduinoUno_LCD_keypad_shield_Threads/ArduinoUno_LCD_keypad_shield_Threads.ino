@@ -1,10 +1,13 @@
 /*********************************************************************/
   #define autor       "Caio Elizio - caioelizio@gmail.com 62 98223-9516"
-  #define programa    "Casa1014 iot Lab "
+  #define programa    "LCD keypad shield "
   #define versao      "v2.0"
   #define dataversao  "17/02/20"
   #define placa       "Arduino Uno LCD keypad shield"
+  #define TempoAtualizacao 10
+  boolean b_debug    = true;
 /*********************************************************************/
+//Sensor DHT11
 //Definicoes Setup
 //Definicoes programacao por serial
 /*Lista de Peças: 
@@ -29,10 +32,14 @@
   #define pinBtnLEFT   3
   #define pinBtnSELECT 4
   #define pinBtnNONE   5
+  #define pinDHT11     A2 //2 ou 3 sensor de temperatura.
+  #define pinSensorPIR 11
+//  #define pin 11 porta livre
+//  #define pin 12 porta livre
 #include <LiquidCrystal.h>
-  //Pin assignments for DFRobot LCD Keypad Shield
-  LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
-  
+  LiquidCrystal lcd(8, 9, 4, 5, 6, 7); //Pin for DFRobot LCD Keypad Shield
+
+
 //Variáveis e objetos globais--------------------------------------
   #define ON  1
   #define OFF 0
@@ -53,24 +60,23 @@
   int adc_key_in  = 0;
 
 
+
 #include <EEPROM.h>
   int  end_EEPROM = 0;  //inicia endereço 
   int  EEPROM_Read(int end_EEPROM);
   void EEPROM_Write(int end_EEPROM_w,int i_valor);
 
 
+//Sensor DHT11
+#include <DHT.h>
+void iniDHT11();
+void f_SensorDHT11();
+  #define DHTTYPE DHT11
+  DHT dht(pinDHT11, DHTTYPE);
+  float f_temp     = 0;
+  float f_humid    = 0;
 
-//Definicoes Setup
-void setup(){
-  initSerial();
-  initOutput(); //Define a porta status de saida e entrada
-  
-  f_lcd_incio();
-  f_AtivaSomTeclas(ON);
-//  f_buzzbeep(); //1 bip
-//  delay(10);
-  delay(1000); //Espera 1 segundo 
-}
+
 
 //Funções----------------------------------------------------------- 
 //Definicoes Serial
@@ -96,13 +102,17 @@ void initOutput(void){ //Definicoes pinos INPUT OUTPUT
   Serial.println(); //Linha em branco  
   pinMode(pinLedOnboard, OUTPUT);  //initialize onboard LED as output
   pinMode(pinBuzzer,     OUTPUT);
-
+  pinMode(pinDHT11,      INPUT);
+  pinMode(pinSensorPIR,  INPUT);
+    
   Serial.println(); //Linha em branco
   Serial.println(F("Definindo dispositivos como desligado ON ou OFF"));  
   iStatusLedOnboard    = EEPROM_Read(13);  //ler status salvo na memoria
   digitalWrite(pinLedOnboard,     iStatusLedOnboard); //led 13 começa com o status salvo
 //  digitalWrite(pinLedOnboard,     OFF);
   digitalWrite(pinBuzzer,         ON);
+  digitalWrite(pinDHT11,          OFF);
+  digitalWrite(pinSensorPIR,      ON);
 
   Serial.print(F("pinLedOnboard         "));  Serial.print(pinLedOnboard);
   if (iStatusLedOnboard == 1){
@@ -110,7 +120,9 @@ void initOutput(void){ //Definicoes pinos INPUT OUTPUT
   }else{
     Serial.println(F(" OFF"));
   }
-  Serial.print(F("pinBuzzer             "));  Serial.print("A1");  Serial.println(F(" ON"));
+  Serial.print(F("pinBuzzer             "));  Serial.print("A1");         Serial.println(F("  ON"));
+  Serial.print(F("pinDHT11              "));  Serial.print(pinDHT11);     Serial.println(F("  OFF"));
+  Serial.print(F("pinSensorPIR          "));  Serial.print(pinSensorPIR); Serial.println(F("  ON"));
 }
 void f_led_arduinoUno(boolean b_valor){ //acende e apaga o led do arduino
   if (b_valor == ON){
@@ -145,12 +157,7 @@ void f_printTempoSerial(){
   if (i_min   < 10){ Serial.print(F("0")); } Serial.print(i_min);   Serial.print(F(":"));
   if (i_seg   < 10){ Serial.print(F("0")); } Serial.println(i_seg);
 }
-void f_printTempoLCD(){
-  lcd.setCursor(8,1);           // move cursor to second line "1" and 9 spaces over
-  if (i_horas < 10){ lcd.print(F("0")); } lcd.print(i_horas); lcd.print(F(":"));
-  if (i_min   < 10){ lcd.print(F("0")); } lcd.print(i_min);   lcd.print(F(":"));
-  if (i_seg   < 10){ lcd.print(F("0")); } lcd.println(i_seg);
-}
+
 
 void f_buzz(int targetPin, long frequency, long length){
   long delayValue = 1000000 / frequency / 2;  // calculate the delay value between transitions
@@ -165,10 +172,6 @@ void f_buzz(int targetPin, long frequency, long length){
 void f_buzzbeep(){
   Serial.println(F("1 bip"));
   f_buzz(pinBuzzer, 300, 50);    //1 bip inicial (pin,frequencia,Duração)  //baixo
-//  f_buzz(pinBuzzer, 1800, 50); //1 bip inicial (pin,frequencia,Duração)  //alto
-//  f_buzz(pinBuzzer, 0, 0);      //stop the tone playing:
-//  f_buzz(pinBuzzer, 0, 20);     //Min
-//  f_buzz(pinBuzzer, 0, 20000);  //Max
 }
 void f_somteclas(){ //som teclas
   if (bsomteclas == true){
@@ -188,13 +191,7 @@ void f_AtivaSomTeclas(boolean b_valor) {
   }
 }
 
-void EEPROM_Clear(){
-  // write a 0 to all 512 bytes of the EEPROM
-  for (int i = 0; i < 512; i++)
-    EEPROM.write(i, 0);
-  // turn the LED on when we're done
-  digitalWrite(13, HIGH);
-}
+
 int EEPROM_Read(int end_EEPROM){ //EEPROM_Read(0-511)
   byte value;
   value = EEPROM.read(end_EEPROM);  //read a byte from the current address 0-511
@@ -220,6 +217,13 @@ void EEPROM_Write(int end_EEPROM_w,int i_valor){ //EEPROM_Write(0-511,0-511)
   Serial.print(F("Valor write: "));      Serial.println(i_valor, DEC);
 //*/
   delay(100);
+}
+void EEPROM_Clear(){
+  // write a 0 to all 512 bytes of the EEPROM
+  for (int i = 0; i < 512; i++)
+    EEPROM.write(i, 0);
+  // turn the LED on when we're done
+  digitalWrite(13, HIGH);
 }
 
 void f_ProgControleSerial(){ 
@@ -269,7 +273,7 @@ int read_LCD_buttons() {
 
  return pinBtnNONE;  // when all others fail, return this...
 }
-void f_teclado() {
+void f_teclado_shied() {
   lcd.setCursor(0,1);             // move to the begining of the second line
   switch (lcd_key) {              // depending on which button was pushed, we perform an action
     case pinBtnRIGHT: {
@@ -299,59 +303,220 @@ void f_teclado() {
     case pinBtnSELECT: {
       lcd.print("SELECT");
       f_somteclas();
+      f_lcd_incio();
       break;
     }
     case pinBtnNONE: {
 //      lcd.print("NONE  ");
-      lcd.print("      ");
+//      lcd.print("      ");
       break;
     }
   }
 }
 
-void f_lcd_incio() {
-  lcd.begin(16, 2);              // start the library
+
+
+
+//Sensor DHT11
+void iniDHT11() {
+  Serial.println(); //Linha em branco
+  Serial.println(F("Iniciando DHT11..."));
+  dht.begin();
+  f_SensorDHT11();
+}
+void f_SensorDHT11() {
+  float f_temp2  = 0;
+  float f_humid2 = 0;
+  int i_temp  = 0;
+  int i_humid = 0;
+  if (dht.readTemperature()) f_temp2  = dht.readTemperature();
+  if (dht.readHumidity())    f_humid2 = dht.readHumidity();
+
+  if (isnan(f_humid2) || isnan(f_temp2)) {
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Falha DHT");
+    Serial.println(F("Falha na leitura do sensor DHT!"));
+    i_temp  = 0;
+    i_humid = 0;
+    return;
+  }
+  else { //se ok...
+    f_temp  = f_temp2;
+    f_humid = f_humid2;
+    i_temp  = f_temp2;
+    i_humid = f_humid2;
+  }
+  Serial.print(F("Temperatura: ")); Serial.print(f_temp, 0);  Serial.print(F("oC"));
+  Serial.print(F(" - Humidade: ")); Serial.print(f_humid, 0); Serial.println(F("%"));
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("Cora Hacker"); // print a simple message
-  lcd.setCursor(0,1);             // move to the begining of the second line
-  lcd.print("N. Reset: ");  lcd.print(iNumReset);
+//  lcd.print("Temp.:    "); lcd.print(f_temp);
+  lcd.print("Temp.:    "); lcd.print(i_temp);
+  lcd.setCursor(0,1);
+//  lcd.print("Humidade: "); lcd.print(f_humid);
+  lcd.print("Humidade: "); lcd.print(i_humid);
+  delay(1000);
+}
+
+
+
+void f_lcd_incio() {
+  lcd.begin(16, 2);  //start the library
+  lcd.clear();
+  lcd.setCursor(0,0); //move to the begining of the 1º line
+  lcd.print("Cora Hacker");
+  f_printNumReset();
   delay(2000);
   lcd.clear();
 }
+void f_printNumReset(){
+  lcd.setCursor(0,1); //move to the begining of the second line
+  lcd.print("N. Reset: ");  lcd.print(iNumReset);
+}
 void f_lcd_teste_botoes() {
+//  Serial.println(); //Linha em branco
+  Serial.println(F("Click em 1 botao"));
   lcd.clear();
-//  lcd.setCursor(0,0);
-//  lcd.print("Click buttons"); // print a simple message
-  lcd.print("Click em 1 botao"); // print a simple message
+  lcd.setCursor(0,0);
+  lcd.print("Click em 1 botao");
+  f_printNumReset();
+}
+void f_printTempoLCD(){
+  f_printTempoSerial(); //tempo desde o ultimo reset
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Tempo reset ");
+  lcd.setCursor(8,1);           // move cursor to second line "1" and 9 spaces over
+  lcd.print(millis()/1000);
+/*  if (i_horas < 10){ lcd.print(F("0")); } lcd.print(i_horas); lcd.print(F(":"));
+  if (i_min   < 10){ lcd.print(F("0")); } lcd.print(i_min);   lcd.print(F(":"));
+  if (i_seg   < 10){ lcd.print(F("0")); } lcd.println(i_seg);
+  //*/
 }
 
 void f_atualiza_sensores(){
   long now = millis()/1000;
-  if (now - lastMsg > 5){ //se maior q 10segundos
+  if (now - lastMsg > TempoAtualizacao){
     lastMsg = now;
     Serial.println(); //Linha em branco
     Serial.println(F("<---------------Atualizando sensores-------------->"));
     f_printTempoSerial(); //tempo desde o ultimo reset
+    f_SensorDHT11();
 
-    f_lcd_teste_botoes();
-    f_printTempoLCD();
-
-//
 //    Serial.print(F("i_seg: ")); Serial.println(i_seg);
 //    Serial.println(); //Linha em branco
     Serial.println(F("<------------------------------------------------->"));
+  } else{
+    f_lcd_teste_botoes();
+    delay(3000);
+    f_printTempoLCD();
+    delay(3000);
   }
 }
 
-void loop() {
-  iniTempo();
-  f_ProgControleSerial();
 
-  f_atualiza_sensores();
+
+class Thread{
+  private:
+    long _delay;
+    unsigned long tempo;
+    long count;
+    
+  public:
+    Thread(long delay);
+    boolean Timer();
+    boolean Refresh();
+    boolean posDelay();
+    int getCount();
+    void setCount();
+};
+
+
+Thread::Thread(long delay){
+  _delay = delay;
+  tempo = 0;
+  count = 0;
+}
+
+boolean Thread::Timer (){
+  return (tempo < millis())? true: false;
+}
+
+boolean Thread::Refresh(){
+  tempo = millis() + _delay;
+  return true;
+}
+
+boolean Thread::posDelay(){
+  return (Timer()== true)? Refresh(): false;
+}
+
+int Thread::getCount(){
+  return count;
+}
+
+
+void Thread::setCount(){
+  count++;
+}
+
+Thread *a, *b, *c, *d;
+long contador;
+
+
+
+
+
+
+//Definicoes Setup
+void setup(){
+  initSerial();
+  initOutput(); //Define a porta status de saida e entrada
   
-  f_teclado();
+  f_lcd_incio();
+  f_AtivaSomTeclas(ON);
+  f_buzzbeep(); //1 bip
+
+  a = new Thread(1000);
+  b = new Thread(3000);
+  c = new Thread(5000);
+  d = new Thread(8000);
+}
+void loop() {
+//  iniTempo();       //atualiza variaveis time do reset
+  
+  //put your main code here, to run repeatedly //coloque seu código principal aqui, para executar repetidamente
+  if(a->posDelay()){
+    a->setCount();
+    f_printTempoLCD();
+  }
+  if(b->posDelay()){
+    b->setCount();
+    f_lcd_teste_botoes();
+  }
+  if(c->posDelay()){
+    f_SensorDHT11();
+    c->setCount();
+  }
+
+  if(a->posDelay()){
+    a->setCount();
+    Serial.print(" A: ");
+    Serial.print(a->getCount());
+    Serial.print(" B: ");
+    Serial.print(b->getCount());
+    Serial.print(" C: ");
+    Serial.print(c->getCount());
+    Serial.print(" D: ");
+    Serial.println(d->getCount());
+  }
+  if(a->posDelay()){
+    a->setCount();
+  }
+
+//  f_ProgControleSerial();
+  f_teclado_shied();
   lcd_key = read_LCD_buttons();  // read the buttons
-  
-  delay(100);
+
 }
